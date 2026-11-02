@@ -1,0 +1,26 @@
+{
+  "name": "techatlas-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "collect": "tsx src/collect.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "tsx tests/check.ts"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.16.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
