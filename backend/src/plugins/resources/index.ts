@@ -40,8 +40,9 @@ export function register({ app, db }: PluginContext) {
   });
 
   app.get('/api/recent', async (_req: Request, res: Response) => {
+    // No date window: a stale collector run must not blank the home page.
     const { rows } = await db.query(
-      `SELECT ${COLS} FROM resources r WHERE r.collected_at > now() - interval '7 days' ORDER BY r.collected_at DESC LIMIT 20`,
+      `SELECT ${COLS} FROM resources r ORDER BY r.collected_at DESC LIMIT 20`,
     );
     res.json(rows);
   });
