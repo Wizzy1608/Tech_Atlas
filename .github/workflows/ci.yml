@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+
+      - run: npm run typecheck --prefix backend
+      - run: npm run check --prefix backend
+      - run: npm run build --prefix frontend
+
+      - name: Install browser
+        run: npx --yes playwright@$(node -p "require('./frontend/node_modules/playwright-core/package.json').version") install --with-deps chromium
+
+      - name: Smoke test the build
+        run: |
+          npm run preview --prefix frontend -- --port 4173 --strictPort &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4173/ > /dev/null && break
+            sleep 1
+          done
+          PW_CHANNEL=chromium node frontend/smoke.mjs http://localhost:4173
