@@ -119,12 +119,13 @@ picks the browser (default `msedge`, CI uses `chromium`).
    ```
 
    Commit the resulting `frontend/public/catalogue.json`.
-3. **Cloudflare** — Workers & Pages → Create → Pages → **Direct Upload**, project name `techatlas`.
+3. **Cloudflare** — Workers & Pages → Create → Pages → **Direct Upload**, project name `tech-atlas`.
    Create an API token with *Cloudflare Pages: Edit*.
 4. **GitHub** → Settings → Secrets and variables → Actions:
    - secrets: `DATABASE_URL`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
-   - variables: `CF_PAGES_PROJECT` (`techatlas` by default), `CF_PAGES_URL` (`https://techatlas.pages.dev`)
-5. Push to `main`. `deploy.yml` builds and uploads `frontend/dist`.
+   - variables: `CF_PAGES_PROJECT` (`tech-atlas` by default), `CF_PAGES_URL` (`https://tech-atlas-e3i.pages.dev`)
+5. Push to `main`. `.github/workflows/deploy.yml` builds the frontend
+   and uploads `frontend/dist` to Cloudflare Pages using Wrangler.
 
 ### Workflows
 
@@ -210,8 +211,12 @@ scripts/
 
 ## Deploy
 
-- Website: Cloudflare Pages via `.github/workflows/deploy.yml` (see above).
-- Data: nightly `.github/workflows/data.yml` against Neon; `catalogue.json` is committed.
-- Legacy single-origin server: build frontend + backend and run `node dist/index.js` with
-  `DATABASE_URL` set. Single instance only (migrations run on boot); set `TRUST_PROXY=1` behind a
-  proxy.
+-## Deploy
+
+- Website: https://tech-atlas-e3i.pages.dev
+  (Cloudflare Pages via `.github/workflows/deploy.yml`).
+- Cloudflare Pages project: `tech-atlas`.
+- Data: nightly `.github/workflows/data.yml` against Neon;
+  `catalogue.json` is committed.
+- Legacy single-origin server: build frontend + backend and run
+  `node dist/index.js` with `DATABASE_URL` set.
