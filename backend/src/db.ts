@@ -8,7 +8,18 @@ import { fileURLToPath } from 'node:url';
 const envFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.env');
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const databaseUrl = process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is missing. Please configure your database connection.');
+}
+
+export const pool = new Pool({
+  connectionString: databaseUrl,
+  ssl: databaseUrl.includes('neon.tech')
+    ? { rejectUnauthorized: true }
+    : undefined,
+});
 
 // ponytail: migrate-on-boot assumes a single app instance; if you scale to
 // multiple replicas, move this to a Fly release_command instead.
