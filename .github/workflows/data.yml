@@ -1,0 +1,59 @@
+
+name: Refresh catalogue
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-catalogue
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci --prefix backend
+
+      - run: npm run migrate --prefix backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - run: npm run collect --prefix backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - run: npm run export --prefix backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Commit the refreshed catalogue
+        run: |
+          if git diff --quiet -- frontend/public/catalogue.json; then
+            echo "catalogue unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/public/catalogue.json
+          git commit -m "data: refresh catalogue"
+          git push
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: refresh
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit

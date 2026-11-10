@@ -6,13 +6,13 @@ bookmarks. Stores titles/descriptions/tags only; all content rights belong to th
 
 ## Stack
 
-- **backend/** — Express 5 + TypeScript + `pg`, tsvector full-text search + pg_trgm fuzzy matching,
-  keyword classifier, plugin registry (auto-loads `src/plugins/*/index.ts`), collector
-  (`npm run collect`) with a GitHub topic fetcher.
+- **backend/** — data pipeline: collectors (`npm run collect`), migrations (`npm run migrate`) and a
+  JSON exporter (`npm run export`). The Express 5 server is kept for local development only.
 - **frontend/** — React 19 + Vite + TypeScript + Tailwind v4 + React Router.
   Feature-folder routing: `src/features/*/index.tsx` exports `routes` and is auto-registered by
   `import.meta.glob` in `src/App.tsx`. State (bookmarks, continue-reading, dark mode) lives in
-  localStorage.
+  localStorage. The deployed build reads `public/catalogue.json`; search and filters run in the
+  browser (`src/lib/api.ts`).
 
 ## Requirements
 
@@ -76,7 +76,80 @@ npm run check
 
 Open-source fetchers only store URLs that respond (HEAD/GET probe, 8s timeout, 8-way concurrency) — dead links never enter the database. Every source call has a 15s deadline. Blog aggregators, GitHub topic dumps, and per-video channel feeds are intentionally excluded (curation over volume).
 
-## Production-style single origin
+## Static website (deployed)
+
+Production is a static build: no server and no database at request time.
+
+```
+nightly Action ──► Neon Postgres ──► npm run collect ──► npm run export
+                                                            │
+                                          frontend/public/catalogue.json
+                                                            │
+push to main ──► CI ──► vite build ──► Cloudflare Pages (CDN, TLS, deploy history)
+```
+
+The browser fetches `/catalogue.json` once (about 1.1 MB, one resource per line so data refreshes
+diff cleanly) and filters, paginates and searches it client-side. Bookmarks, continue-reading and
+theme stay in `localStorage`. Postgres is only touched by the nightly job and by `npm run collect`
+locally.
+
+### Local static build
+
+```sh
+cd backend && npm run export      # writes frontend/public/catalogue.json
+cd ../frontend && npm run build   # writes frontend/dist
+npm run preview                   # http://localhost:4173, no API needed
+node smoke.mjs http://localhost:4173
+```
+
+`smoke.mjs` asserts home, browse, search, a resource page and zero console errors; `PW_CHANNEL`
+picks the browser (default `msedge`, CI uses `chromium`).
+
+### One-time setup
+
+1. **Neon** — create a free project, copy the **pooled** connection string.
+2. **Load data** from your machine:
+
+   ```sh
+   cd backend
+   $env:DATABASE_URL = 'postgresql://...'   # export DATABASE_URL=... on bash
+   npm run migrate
+   npm run collect
+   npm run export
+   ```
+
+   Commit the resulting `frontend/public/catalogue.json`.
+3. **Cloudflare** — Workers & Pages → Create → Pages → **Direct Upload**, project name `tech-atlas`.
+   Create an API token with *Cloudflare Pages: Edit*.
+4. **GitHub** → Settings → Secrets and variables → Actions:
+   - secrets: `DATABASE_URL`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+   - variables: `CF_PAGES_PROJECT` (`tech-atlas` by default), `CF_PAGES_URL` (`https://tech-atlas-e3i.pages.dev`)
+5. Push to `main`. `.github/workflows/deploy.yml` builds the frontend
+   and uploads `frontend/dist` to Cloudflare Pages using Wrangler.
+
+### Workflows
+
+| File | Trigger | Does |
+|---|---|---|
+| `ci.yml` | PR, push to `main` | backend typecheck + checks, frontend build, Playwright smoke |
+| `deploy.yml` | push to `main`, manual, `workflow_call` | build, `wrangler pages deploy`, live URL check |
+| `data.yml` | nightly 04:00 UTC, manual | migrate → collect → export → commit JSON → call deploy |
+
+Nightly commits use `GITHUB_TOKEN`, which does not trigger other workflows, so `data.yml` calls
+`deploy.yml` directly. A failed collection stops before commit and deploy, leaving the last good site
+live. If Neon is unreachable, the committed `catalogue.json` still builds.
+
+### Rollback
+
+- Cloudflare → project → Deployments → **Rollback to this deployment** (instant, no rebuild).
+- Or `git revert <sha> && git push` for a bad data commit.
+- The previous server-rendered app is commit `599ef9c` on `main` — `git checkout 599ef9c` and run the
+  single-origin flow below.
+
+Search is a client-side approximation of the old Postgres FTS, so hit counts differ from older
+versions; `smoke.mjs` checks non-empty results rather than exact totals.
+
+## Production-style single origin (legacy / local)
 
 ```sh
 cd frontend && npm run build   # writes frontend/dist
@@ -86,7 +159,7 @@ cd ../backend && npm run build && npm start   # serves dist + API on :3001
 Set `TRUST_PROXY=1` when running behind Caddy/Nginx/Render, so the rate limiter sees real client IPs.
 Managed Postgres usually needs `?sslmode=require` on `DATABASE_URL`.
 
-## API
+## API (local dev server only)
 
 | Route | Purpose |
 |---|---|
@@ -98,6 +171,8 @@ Managed Postgres usually needs `?sslmode=require` on `DATABASE_URL`.
 | `GET /api/recent` | Recently collected |
 | `GET /api/deals` | Active deals (empty until a deals source is added) |
 
+The deployed website does not call these; equivalent behaviour is in `frontend/src/lib/api.ts`.
+
 ## Structure
 
 ```
@@ -105,7 +180,9 @@ backend/
   migrations/           001_init.sql … 013_cleanup.sql (auto-applied, tracked in _migrations)
   src/
     db.ts               pool + migrate-on-boot
-    index.ts            app, security, plugin loading, static serving
+    index.ts            dev server: security, plugin loading, static serving
+    migrate.ts          npm run migrate (CI / setup)
+    export.ts           npm run export → frontend/public/catalogue.json
     plugin-registry.ts  auto-loads src/plugins/*/index.ts
     classifier.ts       keyword domain classifier
     plugins/            resources, deals (one folder = one API feature)
@@ -113,10 +190,16 @@ backend/
     collect.ts          npm run collect
   tests/check.ts        npm run check
 frontend/
+  public/
+    catalogue.json      generated data (committed)
+    _headers            Cloudflare cache policy
+    _redirects          SPA fallback
+  smoke.mjs             post-build browser smoke test
   src/
     features/           welcome, browse, search, bookmarks, continue, resource (routes registry)
     components/         Layout, ResourceCard, SearchBar, DealBanner, filters, skeletons
-    lib/                api, bookmarks, continue-reading, dark-mode (localStorage)
+    lib/                api (static data layer), bookmarks, continue-reading, dark-mode
+.github/workflows/      ci, deploy, data (nightly refresh)
 scripts/
   reset-pg-password.ps1 elevated, idempotent local Postgres fixer
 ```
@@ -128,7 +211,12 @@ scripts/
 
 ## Deploy
 
-- Build the frontend, build the backend, then run `node dist/index.js` with `DATABASE_URL` set.
-- Single instance only: migrations run on boot. Set `TRUST_PROXY=1` behind a proxy.
-- Free-tier pairing that works in 2026: Render web service + Neon Postgres. Fly.io is trial-only
-  and Railway/Koyeb no longer have free plans.
+-## Deploy
+
+- Website: https://tech-atlas-e3i.pages.dev
+  (Cloudflare Pages via `.github/workflows/deploy.yml`).
+- Cloudflare Pages project: `tech-atlas`.
+- Data: nightly `.github/workflows/data.yml` against Neon;
+  `catalogue.json` is committed.
+- Legacy single-origin server: build frontend + backend and run
+  `node dist/index.js` with `DATABASE_URL` set.
